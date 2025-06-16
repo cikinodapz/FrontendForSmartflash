@@ -39,7 +39,7 @@ FrontendForSmartflash/
 3. **Jalankan development server**
    ```bash
    npm run dev
-   ``` [6](#0-5) 
+   ``` 
 
 4. **Akses aplikasi**
    - Buka browser dan kunjungi `http://localhost:4000`
