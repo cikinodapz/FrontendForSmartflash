@@ -29,6 +29,11 @@ import {
   Sun,
   Moon,
   Layers,
+  FolderGit,
+  FolderGit2,
+  Boxes,
+  Library,
+  Grid,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTheme } from "next-themes";
@@ -243,8 +248,9 @@ export function Navigation() {
   const navItems: NavItem[] = [
     { href: "/", label: "Beranda", icon: Home },
     { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-    { href: "/mindmap", label: "Mindmap", icon: Layers },
     { href: "/create", label: "Buat Deck", icon: Plus },
+    { href: "/group", label: "Grup Deck", icon: Grid },
+    { href: "/mindmap", label: "Mindmap", icon: Layers },
     { href: "/eksplorasi", label: "Eksplorasi", icon: Compass },
     isLoggedIn
       ? { label: "Logout", icon: Power, action: "logout" }

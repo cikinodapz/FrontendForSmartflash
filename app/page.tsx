@@ -28,6 +28,7 @@ import {
   Award,
   Flame,
 } from "lucide-react";
+import SplashScreen from "@/components/SplashScreen";
 
 export default function HomePage() {
   const [cardIndex, setCardIndex] = useState(0);
@@ -136,6 +137,7 @@ export default function HomePage() {
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-white transition-colors duration-300">
       {/* Hero Section */}
       <section className="relative min-h-[90vh] md:min-h-screen flex items-center justify-center overflow-hidden px-4 sm:px-6">
+        <SplashScreen />
         <motion.div
           className="absolute inset-0 bg-gradient-to-br from-indigo-300 via-purple-200 to-purple-400 dark:from-indigo-950 dark:via-gray-900 dark:to-purple-950"
           initial={{ opacity: 0 }}

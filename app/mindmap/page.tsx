@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useLayoutEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import {
@@ -28,6 +28,7 @@ import {
   ChevronUp,
   ChevronDown,
   Sparkles,
+  ArrowLeft,
 } from "lucide-react";
 import {
   Dialog,
@@ -39,7 +40,7 @@ import {
 } from "@/components/ui/dialog";
 
 /** =============================
- *  Tipe data
+ *  Types
  *  ============================= */
 interface Deck {
   id: string;
@@ -61,19 +62,36 @@ interface Flashcard {
   createdAt: string;
   updatedAt: string;
 }
+interface DeckGroup {
+  id: string;
+  name: string;
+  description: string | null;
+  decks?: Deck[];
+  deckIds?: string[];
+  createdAt?: string;
+  updatedAt?: string;
+}
 
 /** =============================
- *  Konstanta Layout & UI
+ *  Layout constants
  *  ============================= */
 const CANVAS_W = 1600;
 const CANVAS_H = 1000;
+
+// Mode single-deck (center bubble)
 const CENTER = { x: CANVAS_W / 2 + 100, y: CANVAS_H / 2 - 50 };
+
+// Mode group (box on the left)
+const GROUP_CENTER = { x: 260, y: CANVAS_H / 2 };
+const GROUP_TO_TRUNK = 160; // distance from group box to trunk
+const TRUNK_TO_DECK = 160; // distance from trunk to deck ovals
+const DEFAULT_V_SPACING = 170;
+const GROUP_MARGIN_V = 60;
 
 const CARD_W_COMPACT = 260;
 const CARD_H_COMPACT = 140;
 const CARD_W_EXPANDED = 360;
 const CARD_H_EXPANDED = 240;
-
 const HEADER_H = 30;
 
 const CARD_MARGIN = 24;
@@ -83,20 +101,21 @@ const GRID_SIZE = 20;
 
 const DECK_DIAM = 140;
 const DECK_R = DECK_DIAM / 2;
-const DECK_RING_PX = 4;
+
+const GROUP_W = 260;
+const GROUP_H = 140;
+
+const NODE_W = 170; // deck oval in group mode
+const NODE_H = 104;
+const NODE_R = NODE_W / 2;
 
 /** =============================
- *  Util
+ *  Utils
  *  ============================= */
-function clamp(v: number, min: number, max: number) {
-  return Math.max(min, Math.min(max, v));
-}
-function snap(v: number, step = GRID_SIZE) {
-  return Math.round(v / step) * step;
-}
-function storageKey(deckId: string) {
-  return `mindmap-layout-${deckId}`;
-}
+const clamp = (v: number, min: number, max: number) =>
+  Math.max(min, Math.min(max, v));
+const snap = (v: number, step = GRID_SIZE) => Math.round(v / step) * step;
+const storageKey = (deckId: string) => `mindmap-layout-${deckId}`;
 
 function circleAnchorTowards(
   center: { x: number; y: number },
@@ -111,7 +130,6 @@ function circleAnchorTowards(
     y: center.y + (dy / len) * radius,
   };
 }
-
 function rectAnchorTowards(
   rectCenter: { x: number; y: number },
   w: number,
@@ -130,7 +148,7 @@ function rectAnchorTowards(
 }
 
 /** =============================
- *  Auto Layout Non-Overlap
+ *  Auto layout (cards radial)
  *  ============================= */
 function autoLayoutNoOverlap(count: number) {
   const cw = CARD_W_COMPACT;
@@ -151,7 +169,6 @@ function autoLayoutNoOverlap(count: number) {
       const angle = (2 * Math.PI * i) / take;
       const x = CENTER.x + r * Math.cos(angle);
       const y = CENTER.y + r * Math.sin(angle);
-
       out.push({
         x: clamp(x, cw / 2 + 8, CANVAS_W - cw / 2 - 8),
         y: clamp(y, ch / 2 + 8, CANVAS_H - ch / 2 - 8),
@@ -166,7 +183,31 @@ function autoLayoutNoOverlap(count: number) {
 }
 
 /** =============================
- *  Komponen Halaman
+ *  Group column layout
+ *  ============================= */
+function layoutGroupColumn(n: number) {
+  const avail = CANVAS_H - 2 * GROUP_MARGIN_V;
+  const spacing = n > 1 ? Math.min(DEFAULT_V_SPACING, avail / (n - 1)) : 0;
+  const trunkX = GROUP_CENTER.x + GROUP_TO_TRUNK;
+  const deckX = trunkX + TRUNK_TO_DECK;
+
+  const firstY = CANVAS_H / 2 - (spacing * (n - 1)) / 2;
+
+  const positions: { x: number; y: number }[] = Array.from({ length: n }).map(
+    (_, i) => ({
+      x: deckX,
+      y: clamp(firstY + i * spacing, NODE_H / 2 + 8, CANVAS_H - NODE_H / 2 - 8),
+    })
+  );
+
+  const y1 = n ? Math.min(...positions.map((p) => p.y)) : GROUP_CENTER.y;
+  const y2 = n ? Math.max(...positions.map((p) => p.y)) : GROUP_CENTER.y;
+
+  return { positions, trunkX, trunkY1: y1, trunkY2: y2 };
+}
+
+/** =============================
+ *  Component
  *  ============================= */
 export default function MindmapPage() {
   const router = useRouter();
@@ -180,51 +221,69 @@ export default function MindmapPage() {
   const [loadingDecks, setLoadingDecks] = useState(true);
   const [loadingCards, setLoadingCards] = useState(false);
 
-  // editor-like states
+  // Groups
+  const [deckGroups, setDeckGroups] = useState<DeckGroup[]>([]);
+  const [loadingGroups, setLoadingGroups] = useState(true);
+  const [selectedGroupId, setSelectedGroupId] = useState("");
+  const [selectedGroup, setSelectedGroup] = useState<DeckGroup | null>(null);
+  const [groupDecks, setGroupDecks] = useState<Deck[]>([]);
+
+  // Group layout
+  const [groupPositions, setGroupPositions] = useState<
+    Record<string, { x: number; y: number }>
+  >({});
+  const [groupTrunk, setGroupTrunk] = useState<{
+    x: number;
+    y1: number;
+    y2: number;
+  } | null>(null);
+
+  // Canvas editor states
   const [scale, setScale] = useState(0.95);
   const [snapGrid, setSnapGrid] = useState(true);
   const [search, setSearch] = useState("");
   const [collapsed, setCollapsed] = useState(true);
 
-  // posisi & state per kartu
+  // Card states
   const [positions, setPositions] = useState<
     Record<string, { x: number; y: number }>
   >({});
   const [flipped, setFlipped] = useState<Record<string, boolean>>({});
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
-
-  // hover untuk highlight edge
   const [hoverId, setHoverId] = useState<string | null>(null);
 
-  // drag state
+  // Drag state (cards only)
   const dragRef = useRef<{
     id: string | null;
     offsetX: number;
     offsetY: number;
+    pointerId: number | null;
   }>({
     id: null,
     offsetX: 0,
     offsetY: 0,
+    pointerId: null,
   });
 
-  // pointer guard (drag vs click)
   const pointerRef = useRef<{ downX: number; downY: number; moved: boolean }>({
     downX: 0,
     downY: 0,
     moved: false,
   });
+
+  const lastDragEndRef = useRef<number>(0);
+  const GHOST_CLICK_MS = 180;
   const MOVE_THRESH = 6;
 
-  // refs
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
 
-  // Deck Picker Modal
+  // Deck Picker Modal (KEEP — unchanged)
   const [deckPickerOpen, setDeckPickerOpen] = useState(false);
   const [deckSearch, setDeckSearch] = useState("");
   const [tempSelectedDeckId, setTempSelectedDeckId] = useState<string>("");
+  const [tempSelectedGroupId, setTempSelectedGroupId] = useState<string>("");
 
-  // helper size per card
   const getCardSize = (id: string) => {
     const exp = expanded[id];
     return {
@@ -233,9 +292,7 @@ export default function MindmapPage() {
     };
   };
 
-  /** =============================
-   *  Fetch Decks (on mount)
-   *  ============================= */
+  /** Fetch decks */
   useEffect(() => {
     const token = localStorage.getItem("token");
     if (!token) {
@@ -247,41 +304,72 @@ export default function MindmapPage() {
       router.push("/login");
       return;
     }
-    const fetchDecks = async () => {
+    const ac = new AbortController();
+    (async () => {
       setLoadingDecks(true);
       try {
-        const response = await fetch("http://localhost:3000/user/getAllDeck", {
+        const res = await fetch("http://localhost:3000/user/getAllDeck", {
           headers: { Authorization: `Bearer ${token}` },
+          signal: ac.signal,
         });
-        if (!response.ok) throw new Error("Gagal mengambil daftar deck");
-        const data = await response.json();
-        setDecks(data.decks || []);
-      } catch (err: any) {
-        toast({
-          title: "Error",
-          description: err?.message ?? "Terjadi kesalahan saat mengambil deck",
-          variant: "destructive",
-        });
+        if (!res.ok) throw new Error("Gagal mengambil daftar deck");
+        const data = await res.json();
+        if (!ac.signal.aborted) setDecks(data.decks || []);
+      } catch (e: any) {
+        if (e?.name !== "AbortError")
+          toast({
+            title: "Error",
+            description: e?.message ?? "Gagal mengambil deck",
+            variant: "destructive",
+          });
       } finally {
-        setLoadingDecks(false);
+        if (!ac.signal.aborted) setLoadingDecks(false);
       }
-    };
-    fetchDecks();
+    })();
+    return () => ac.abort();
   }, [router, toast]);
 
-  /** =============================
-   *  Open Deck Picker once decks loaded
-   *  ============================= */
+  /** Fetch groups */
   useEffect(() => {
-    if (!loadingDecks) {
+    const token = localStorage.getItem("token");
+    if (!token) return;
+    const ac = new AbortController();
+    (async () => {
+      setLoadingGroups(true);
+      try {
+        const res = await fetch("http://localhost:3000/user/deck-groups", {
+          headers: { Authorization: `Bearer ${token}` },
+          signal: ac.signal,
+        });
+        if (!res.ok) throw new Error("Gagal mengambil daftar grup deck");
+        const data = await res.json();
+        const groups: DeckGroup[] =
+          data.deckGroups ?? data.groups ?? data.data ?? [];
+        if (!ac.signal.aborted) setDeckGroups(groups);
+      } catch (e: any) {
+        if (e?.name !== "AbortError")
+          toast({
+            title: "Error",
+            description: e?.message ?? "Gagal mengambil grup deck",
+            variant: "destructive",
+          });
+      } finally {
+        if (!ac.signal.aborted) setLoadingGroups(false);
+      }
+    })();
+    return () => ac.abort();
+  }, [toast]);
+
+  /** Open picker after lists loaded */
+  useEffect(() => {
+    if (!loadingDecks && !loadingGroups) {
       setDeckPickerOpen(true);
       setTempSelectedDeckId("");
+      setTempSelectedGroupId("");
     }
-  }, [loadingDecks]);
+  }, [loadingDecks, loadingGroups]);
 
-  /** =============================
-   *  When deck changes -> fetch cards
-   *  ============================= */
+  /** When deck changes -> fetch cards */
   useEffect(() => {
     if (!selectedDeckId) {
       setSelectedDeck(null);
@@ -298,44 +386,103 @@ export default function MindmapPage() {
     const token = localStorage.getItem("token");
     if (!token) return;
 
-    const fetchCards = async () => {
+    const ac = new AbortController();
+    (async () => {
       setLoadingCards(true);
       try {
-        const response = await fetch(
+        const res = await fetch(
           `http://localhost:3000/user/listCard/${deck.id}`,
           {
             headers: { Authorization: `Bearer ${token}` },
+            signal: ac.signal,
           }
         );
-        if (!response.ok) throw new Error("Gagal mengambil flashcard");
-        const data = await response.json();
-        const cards: Flashcard[] = data.flashcards || [];
-        setFlashcards(cards);
-        setFlipped({});
-        setExpanded({});
-      } catch (err: any) {
-        toast({
-          title: "Error",
-          description:
-            err?.message ?? "Terjadi kesalahan saat mengambil flashcard",
-          variant: "destructive",
-        });
+        if (!res.ok) throw new Error("Gagal mengambil flashcard");
+        const data = await res.json();
+        if (!ac.signal.aborted) {
+          setFlashcards(data.flashcards || []);
+          setFlipped({});
+          setExpanded({});
+        }
+      } catch (e: any) {
+        if (e?.name !== "AbortError")
+          toast({
+            title: "Error",
+            description: e?.message ?? "Gagal mengambil flashcard",
+            variant: "destructive",
+          });
       } finally {
-        setLoadingCards(false);
+        if (!ac.signal.aborted) setLoadingCards(false);
       }
-    };
-    fetchCards();
+    })();
+    return () => ac.abort();
   }, [selectedDeckId, decks, toast]);
 
-  /** =============================
-   *  Load saved positions or auto-layout
-   *  ============================= */
+  /** When group changes -> fetch detail + build column layout */
+  useEffect(() => {
+    if (!selectedGroupId) {
+      setSelectedGroup(null);
+      setGroupDecks([]);
+      setGroupPositions({});
+      setGroupTrunk(null);
+      return;
+    }
+    const token = localStorage.getItem("token");
+    if (!token) return;
+
+    const ac = new AbortController();
+    (async () => {
+      try {
+        const res = await fetch(
+          `http://localhost:3000/user/deck-groups/${selectedGroupId}`,
+          {
+            headers: { Authorization: `Bearer ${token}` },
+            signal: ac.signal,
+          }
+        );
+        if (!res.ok) throw new Error("Gagal mengambil detail grup");
+        const data = await res.json();
+        const group: DeckGroup =
+          data.deckGroup ?? data.group ?? data.data ?? data;
+        if (ac.signal.aborted) return;
+        setSelectedGroup(group);
+
+        let deckList: Deck[] = [];
+        if (Array.isArray(group.decks) && group.decks.length) {
+          deckList = group.decks as unknown as Deck[];
+        } else if (Array.isArray(group.deckIds) && decks.length) {
+          deckList = decks.filter((d) => group.deckIds!.includes(d.id));
+        } else if (Array.isArray((group as any).deckId) && decks.length) {
+          const ids = (group as any).deckId as string[];
+          deckList = decks.filter((d) => ids.includes(d.id));
+        }
+        setGroupDecks(deckList);
+
+        const { positions, trunkX, trunkY1, trunkY2 } = layoutGroupColumn(
+          deckList.length
+        );
+        const posMap: Record<string, { x: number; y: number }> = {};
+        deckList.forEach((d, i) => (posMap[d.id] = positions[i]));
+        setGroupPositions(posMap);
+        setGroupTrunk({ x: trunkX, y1: trunkY1, y2: trunkY2 });
+      } catch (e: any) {
+        if (e?.name !== "AbortError")
+          toast({
+            title: "Error",
+            description: e?.message ?? "Gagal mengambil detail grup",
+            variant: "destructive",
+          });
+      }
+    })();
+    return () => ac.abort();
+  }, [selectedGroupId, decks, toast]);
+
+  /** Load saved positions or auto-layout (cards) */
   useEffect(() => {
     if (!selectedDeck || flashcards.length === 0) {
       setPositions({});
       return;
     }
-
     const key = storageKey(selectedDeck.id);
     const saved = localStorage.getItem(key);
     if (saved) {
@@ -365,19 +512,16 @@ export default function MindmapPage() {
         setPositions(next);
         return;
       } catch {
-        // ignore; fallthrough
+        /* ignore */
       }
     }
-
     const base = autoLayoutNoOverlap(flashcards.length);
     const map: Record<string, { x: number; y: number }> = {};
     flashcards.forEach((c, i) => (map[c.id] = base[i]));
     setPositions(map);
   }, [selectedDeck, flashcards]);
 
-  /** =============================
-   *  Derived: filtered cards by search
-   *  ============================= */
+  /** Derived */
   const filteredCards = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return flashcards;
@@ -389,45 +533,47 @@ export default function MindmapPage() {
     );
   }, [flashcards, search]);
 
-  /** =============================
-   *  Actions
-   *  ============================= */
+  const availableDecks = useMemo(
+    () => (selectedGroup ? groupDecks : decks),
+    [selectedGroup, groupDecks, decks]
+  );
+
+  /** Actions */
   const handleAutoLayout = () => {
     if (!flashcards.length) return;
     const base = autoLayoutNoOverlap(flashcards.length);
     const map: Record<string, { x: number; y: number }> = {};
     flashcards.forEach((c, i) => (map[c.id] = base[i]));
     setPositions(map);
-    toast({
-      title: "Auto-layout",
-      description: "Posisi disusun ulang tanpa tumpang tindih.",
-    });
+    toast({ title: "Auto-layout", description: "Posisi disusun ulang." });
   };
-
   const handleSaveLayout = () => {
     if (!selectedDeck) return;
     localStorage.setItem(
       storageKey(selectedDeck.id),
       JSON.stringify(positions)
     );
-    toast({
-      title: "Tersimpan",
-      description: "Layout kamu disimpan untuk deck ini.",
-    });
+    toast({ title: "Tersimpan", description: "Layout kartu disimpan." });
   };
-
   const handleResetLayout = () => {
     if (!selectedDeck) return;
     localStorage.removeItem(storageKey(selectedDeck.id));
     handleAutoLayout();
-    toast({
-      title: "Di-reset",
-      description: "Layout kembali ke bawaan auto-layout.",
-    });
+    toast({ title: "Di-reset", description: "Kembali ke auto-layout." });
+  };
+  const backToGroup = () => {
+    if (!selectedGroupId) return;
+    setSelectedDeckId("");
+    setFlipped({});
+    setExpanded({});
+    setPositions({});
+    setSearch("");
   };
 
-  const zoomIn = () => setScale((s) => clamp(s + 0.1, 0.4, 2));
-  const zoomOut = () => setScale((s) => clamp(s - 0.1, 0.4, 2));
+  const zoomIn = () =>
+    setScale((s) => clamp(Number((s + 0.1).toFixed(2)), 0.4, 2));
+  const zoomOut = () =>
+    setScale((s) => clamp(Number((s - 0.1).toFixed(2)), 0.4, 2));
   const zoomFit = () => {
     const wrap = wrapRef.current;
     if (!wrap) {
@@ -447,140 +593,232 @@ export default function MindmapPage() {
   const toggleExpand = (id: string) =>
     setExpanded((p) => ({ ...p, [id]: !p[id] }));
 
-  /** =============================
-   *  Drag & Drop + guard klik
-   *  ============================= */
+  /** Stable drag with rAF + pointer events (fix ghost click & jitter) */
   useEffect(() => {
-    const onMove = (e: MouseEvent) => {
-      const id = dragRef.current.id;
-      if (!id) return;
-      const rect = canvasRef.current?.getBoundingClientRect();
-      if (!rect) return;
+    let raf = 0;
 
-      const mx = (e.clientX - rect.left) / scale;
-      const my = (e.clientY - rect.top) / scale;
+    const onMove = (e: PointerEvent) => {
+      if (!dragRef.current.id) return;
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        const rect = canvasRef.current?.getBoundingClientRect();
+        if (!rect) return;
+        const mx = (e.clientX - rect.left) / scale;
+        const my = (e.clientY - rect.top) / scale;
 
-      if (!pointerRef.current.moved) {
-        const dx = mx - pointerRef.current.downX;
-        const dy = my - pointerRef.current.downY;
-        if (Math.hypot(dx, dy) > MOVE_THRESH) pointerRef.current.moved = true;
-      }
+        if (!pointerRef.current.moved) {
+          const dx = mx - pointerRef.current.downX;
+          const dy = my - pointerRef.current.downY;
+          if (Math.hypot(dx, dy) > MOVE_THRESH) pointerRef.current.moved = true;
+        }
 
-      const { w: cw, h: ch } = getCardSize(id);
+        const id = dragRef.current.id!;
+        const { w: cw, h: ch } = getCardSize(id);
+        let nx = mx - dragRef.current.offsetX;
+        let ny = my - dragRef.current.offsetY;
 
-      let nx = mx - dragRef.current.offsetX;
-      let ny = my - dragRef.current.offsetY;
+        if (snapGrid) {
+          nx = snap(nx);
+          ny = snap(ny);
+        }
+        nx = clamp(nx, cw / 2 + 4, CANVAS_W - cw / 2 - 4);
+        ny = clamp(ny, ch / 2 + 4, CANVAS_H - ch / 2 - 4);
 
-      if (snapGrid) {
-        nx = snap(nx);
-        ny = snap(ny);
-      }
-
-      nx = clamp(nx, cw / 2 + 4, CANVAS_W - cw / 2 - 4);
-      ny = clamp(ny, ch / 2 + 4, CANVAS_H - ch / 2 - 4);
-
-      setPositions((prev) => ({ ...prev, [id]: { x: nx, y: ny } }));
+        setPositions((prev) =>
+          prev[id] && prev[id].x === nx && prev[id].y === ny
+            ? prev
+            : { ...prev, [id]: { x: nx, y: ny } }
+        );
+      });
     };
 
-    const onUp = () => {
+    const onUp = (e: PointerEvent) => {
+      if (dragRef.current.id) {
+        // jika ada drag aktif, tandai waktu selesai drag
+        if (pointerRef.current.moved) {
+          lastDragEndRef.current = performance.now();
+        }
+        // release capture kalau ada
+        try {
+          const el = document.getElementById("__drag_handle__");
+          (el as any)?.releasePointerCapture?.(dragRef.current.pointerId!);
+        } catch {}
+      }
       dragRef.current.id = null;
+      dragRef.current.pointerId = null;
+      pointerRef.current.moved = false; // reset biar klik berikutnya nggak ke-block
     };
 
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
+    window.addEventListener("pointermove", onMove, { passive: true });
+    window.addEventListener("pointerup", onUp, { passive: true });
     return () => {
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
+      cancelAnimationFrame(raf);
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
     };
   }, [scale, snapGrid, expanded]);
 
-  const startDrag =
-    (id: string) => (e: React.MouseEvent<HTMLDivElement, MouseEvent>) => {
-      const canvasRect = canvasRef.current?.getBoundingClientRect();
-      if (!canvasRect) return;
+  // START DRAG — pakai POINTER, hanya di header/handle
+  // START DRAG — pakai POINTER, hanya di header/handle & bukan pada elemen interaktif
+  const startDrag = (id: string) => (e: React.PointerEvent<HTMLDivElement>) => {
+    const target = e.target as HTMLElement;
 
-      const mx = (e.clientX - canvasRect.left) / scale;
-      const my = (e.clientY - canvasRect.top) / scale;
+    // HARUS dari area header/handle
+    const inHeader = target.closest("[data-card-handle='1']");
+    if (!inHeader) return;
 
-      const pos = positions[id] || { x: CENTER.x, y: CENTER.y };
-      dragRef.current.id = id;
-      dragRef.current.offsetX = mx - pos.x;
-      dragRef.current.offsetY = my - pos.y;
+    // ABAIKAN kalau klik elemen interaktif (tombol, dll) yang ditandai
+    if (target.closest("[data-nodrag='1']")) return;
 
-      pointerRef.current.downX = mx;
-      pointerRef.current.downY = my;
-      pointerRef.current.moved = false;
-    };
+    e.preventDefault();
+
+    const canvasRect = canvasRef.current?.getBoundingClientRect();
+    if (!canvasRect) return;
+
+    const mx = (e.clientX - canvasRect.left) / scale;
+    const my = (e.clientY - canvasRect.top) / scale;
+
+    const pos = positions[id] || { x: CENTER.x, y: CENTER.y };
+    dragRef.current.id = id;
+    dragRef.current.offsetX = mx - pos.x;
+    dragRef.current.offsetY = my - pos.y;
+    dragRef.current.pointerId = e.pointerId;
+
+    pointerRef.current.downX = mx;
+    pointerRef.current.downY = my;
+    pointerRef.current.moved = false;
+
+    // capture pointer ke elemen header biar drag stabil
+    const header = (e.currentTarget as HTMLElement).querySelector(
+      "[data-card-handle='1']"
+    ) as HTMLElement | null;
+    header?.setPointerCapture?.(e.pointerId);
+  };
+
+  // BODY tap area: reset baseline supaya flip nggak ke-block sisa flag lama
+  const onBodyPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    const rect = canvasRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const mx = (e.clientX - rect.left) / scale;
+    const my = (e.clientY - rect.top) / scale;
+    pointerRef.current.downX = mx;
+    pointerRef.current.downY = my;
+    pointerRef.current.moved = false;
+  };
 
   const tryFlip =
     (id: string) =>
     (e: React.MouseEvent | React.KeyboardEvent<HTMLDivElement>) => {
-      if (pointerRef.current.moved || dragRef.current.id) return;
+      // cegah flip kalau baru selesai drag (ghost click) atau sedang drag
+      const now = performance.now();
+      if (now - lastDragEndRef.current < GHOST_CLICK_MS) return;
+      if (dragRef.current.id) return;
+
       if ("key" in e) {
         const k = e.key.toLowerCase();
         if (k !== "enter" && k !== " ") return;
         e.preventDefault();
       }
+      // kalau pointer sempat gerak jauh sebelum mouseup, jangan flip
+      if (pointerRef.current.moved) return;
+
       toggleFlip(id);
     };
 
-  // Keyboard shortcuts: + / - / F
+  // keyboard shortcuts
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag && /INPUT|TEXTAREA|SELECT/.test(tag)) return;
+
       if (e.key === "=" || e.key === "+") {
         e.preventDefault();
         zoomIn();
+        return;
       }
       if (e.key === "-" || e.key === "_") {
         e.preventDefault();
         zoomOut();
+        return;
       }
       if (e.key.toLowerCase() === "f") {
         e.preventDefault();
         zoomFit();
+        return;
+      }
+      if (e.key === "Escape") {
+        if (selectedGroup && selectedDeck) {
+          e.preventDefault();
+          backToGroup();
+        }
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
+  }, [selectedGroup, selectedDeck]);
+
+  // Auto fit when wrapper resizes
+  useLayoutEffect(() => {
+    const el = wrapRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => zoomFit());
+    ro.observe(el);
+    zoomFit();
+    return () => ro.disconnect();
   }, []);
+
+  /** Modal filtering (UNCHANGED behavior) */
+  const filteredDecks = useMemo(() => {
+    const q = deckSearch.trim().toLowerCase();
+    if (!q) return availableDecks;
+    return availableDecks.filter(
+      (d) =>
+        d.name.toLowerCase().includes(q) ||
+        (d.category || "").toLowerCase().includes(q) ||
+        (d.description || "").toLowerCase().includes(q)
+    );
+  }, [availableDecks, deckSearch]);
+
+  const filteredGroups = useMemo(() => {
+    const q = deckSearch.trim().toLowerCase();
+    if (!q) return deckGroups;
+    return deckGroups.filter(
+      (g) =>
+        g.name.toLowerCase().includes(q) ||
+        (g.description || "").toLowerCase().includes(q)
+    );
+  }, [deckGroups, deckSearch]);
+
+  const confirmPick = () => {
+    if (!tempSelectedDeckId && !tempSelectedGroupId) {
+      toast({
+        title: "Pilih terlebih dahulu",
+        description: "Silakan pilih deck atau grup.",
+      });
+      return;
+    }
+    if (tempSelectedGroupId) {
+      setSelectedGroupId(tempSelectedGroupId);
+      setSelectedDeckId("");
+      setTempSelectedDeckId("");
+    } else {
+      setSelectedDeckId(tempSelectedDeckId);
+      setSelectedGroupId("");
+      setTempSelectedGroupId("");
+    }
+    setDeckPickerOpen(false);
+  };
 
   /** =============================
    *  Render
    *  ============================= */
   const showCards = filteredCards;
 
-  // Filter decks (modal)
-  const filteredDecks = useMemo(() => {
-    const q = deckSearch.trim().toLowerCase();
-    if (!q) return decks;
-    return decks.filter(
-      (d) =>
-        d.name.toLowerCase().includes(q) ||
-        (d.category || "").toLowerCase().includes(q) ||
-        (d.description || "").toLowerCase().includes(q)
-    );
-  }, [decks, deckSearch]);
-
-  const confirmPickDeck = () => {
-    if (!tempSelectedDeckId) {
-      toast({
-        title: "Pilih deck dulu",
-        description: "Silakan pilih salah satu deck untuk ditampilkan.",
-      });
-      return;
-    }
-    setSelectedDeckId(tempSelectedDeckId);
-    setDeckPickerOpen(false);
-  };
-
   return (
     <div className="flex flex-col gap-3 px-3 md:px-6 py-3">
-      {/* DECK PICKER MODAL */}
+      {/* ========== POPUP PILIH GROUP/DECK (UNCHANGED) ========== */}
       <Dialog open={deckPickerOpen} onOpenChange={setDeckPickerOpen}>
         <DialogContent className="sm:max-w-2xl overflow-hidden p-0">
-          {/* Header */}
           <div
             className="relative px-6 pt-6 pb-4 text-white"
             style={{
@@ -591,25 +829,52 @@ export default function MindmapPage() {
             <DialogHeader className="text-white">
               <DialogTitle className="flex items-center gap-2 text-white">
                 <Sparkles className="h-5 w-5" />
-                Pilih Deck untuk Ditampilkan
+                Pilih Konten untuk Ditampilkan
               </DialogTitle>
               <DialogDescription className="text-white/90">
-                Pilih deck yang ingin kamu lihat di kanvas mindmap. Bisa diganti
-                kapan saja dari toolbar.
+                Pilih grup deck atau deck yang ingin kamu lihat di kanvas
+                mindmap. Bisa diganti kapan saja dari toolbar.
               </DialogDescription>
             </DialogHeader>
             <div className="mt-3">
               <Input
                 value={deckSearch}
                 onChange={(e) => setDeckSearch(e.target.value)}
-                placeholder="Cari deck berdasarkan nama/kategori…"
+                placeholder="Cari grup/deck…"
                 className="bg-white/90 text-foreground placeholder:text-muted-foreground"
               />
             </div>
           </div>
 
-          {/* Content */}
           <div className="p-6 pt-4 space-y-4">
+            {/* Pilih Group */}
+            <div className="flex items-center gap-2">
+              <Label className="min-w-24">Group</Label>
+              <Select
+                value={tempSelectedGroupId}
+                onValueChange={setTempSelectedGroupId}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue
+                    placeholder={loadingGroups ? "Memuat…" : "Pilih group…"}
+                  />
+                </SelectTrigger>
+                <SelectContent>
+                  {filteredGroups.length === 0 && (
+                    <div className="px-3 py-2 text-sm text-muted-foreground">
+                      Tidak ada grup
+                    </div>
+                  )}
+                  {filteredGroups.map((g) => (
+                    <SelectItem key={g.id} value={g.id}>
+                      {g.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Pilih Deck */}
             <div className="flex items-center gap-2">
               <Label className="min-w-24">Deck</Label>
               <Select
@@ -624,7 +889,7 @@ export default function MindmapPage() {
                 <SelectContent>
                   {filteredDecks.length === 0 && (
                     <div className="px-3 py-2 text-sm text-muted-foreground">
-                      Tidak ada hasil
+                      Tidak ada deck
                     </div>
                   )}
                   {filteredDecks.map((d) => (
@@ -636,13 +901,47 @@ export default function MindmapPage() {
               </Select>
             </div>
 
+            {/* Grid list */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-[38vh] overflow-auto pr-1">
+              {filteredGroups.map((g) => {
+                const active = tempSelectedGroupId === g.id;
+                return (
+                  <button
+                    key={g.id}
+                    onClick={() => {
+                      setTempSelectedGroupId(g.id);
+                      setTempSelectedDeckId("");
+                    }}
+                    className={`rounded-xl border text-left p-4 transition-all hover:-translate-y-0.5 hover:shadow ${
+                      active
+                        ? "border-indigo-500 ring-2 ring-indigo-500/30 bg-indigo-50/60 dark:bg-indigo-950/20"
+                        : "border-border bg-card"
+                    }`}
+                  >
+                    <div className="font-semibold leading-tight line-clamp-2">
+                      {g.name}
+                    </div>
+                    <div className="mt-1 text-xs text-muted-foreground line-clamp-2">
+                      {g.description || "Tanpa deskripsi"}
+                    </div>
+                    <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+                      <span className="rounded-full px-2 py-0.5 bg-muted">
+                        Group
+                      </span>
+                    </div>
+                  </button>
+                );
+              })}
               {filteredDecks.map((d) => {
-                const active = tempSelectedDeckId === d.id;
+                const active =
+                  tempSelectedDeckId === d.id && !tempSelectedGroupId;
                 return (
                   <button
                     key={d.id}
-                    onClick={() => setTempSelectedDeckId(d.id)}
+                    onClick={() => {
+                      setTempSelectedDeckId(d.id);
+                      setTempSelectedGroupId("");
+                    }}
                     className={`rounded-xl border text-left p-4 transition-all hover:-translate-y-0.5 hover:shadow ${
                       active
                         ? "border-indigo-500 ring-2 ring-indigo-500/30 bg-indigo-50/60 dark:bg-indigo-950/20"
@@ -683,11 +982,12 @@ export default function MindmapPage() {
               >
                 Nanti saja
               </Button>
-              <Button onClick={confirmPickDeck}>Tampilkan</Button>
+              <Button onClick={confirmPick}>Tampilkan</Button>
             </div>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      {/* ========== END POPUP (UNCHANGED) ========== */}
 
       {/* TOP BAR */}
       <div className="sticky top-0 z-30 rounded-xl border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
@@ -697,22 +997,53 @@ export default function MindmapPage() {
             <span>Mindmap</span>
           </div>
 
+          {/* Select Group */}
+          <div className="min-w-[220px]">
+            {loadingGroups ? (
+              <div className="text-xs text-muted-foreground">Memuat grup…</div>
+            ) : deckGroups.length ? (
+              <Select
+                value={selectedGroupId}
+                onValueChange={(v) => {
+                  setSelectedGroupId(v);
+                  setSelectedDeckId("");
+                }}
+              >
+                <SelectTrigger className="h-8">
+                  <SelectValue placeholder="Pilih Grup" />
+                </SelectTrigger>
+                <SelectContent>
+                  {deckGroups.map((g) => (
+                    <SelectItem key={g.id} value={g.id}>
+                      {g.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : (
+              <div className="text-xs text-muted-foreground">
+                Belum ada grup
+              </div>
+            )}
+          </div>
+
+          {/* Select Deck */}
           <div className="min-w-[220px]">
             {loadingDecks ? (
               <div className="text-xs text-muted-foreground">Memuat deck…</div>
-            ) : decks.length ? (
+            ) : availableDecks.length ? (
               <Select
                 value={selectedDeckId}
                 onValueChange={(v) => {
                   setSelectedDeckId(v);
-                  setTempSelectedDeckId(v);
+                  setSelectedGroupId("");
                 }}
               >
                 <SelectTrigger className="h-8">
                   <SelectValue placeholder="Pilih Deck" />
                 </SelectTrigger>
                 <SelectContent>
-                  {decks.map((deck) => (
+                  {availableDecks.map((deck) => (
                     <SelectItem key={deck.id} value={deck.id}>
                       {deck.name}
                     </SelectItem>
@@ -726,16 +1057,18 @@ export default function MindmapPage() {
             )}
           </div>
 
+          {/* Search */}
           <div className="flex-1 min-w-[200px]">
             <Input
               placeholder="Cari card…"
               className="h-8"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
+              disabled={!!selectedGroup && !selectedDeckId}
             />
           </div>
 
-             {/* Tools kanan */}
+          {/* Tools */}
           <div className="flex items-center gap-1">
             <Button
               size="sm"
@@ -777,8 +1110,22 @@ export default function MindmapPage() {
               )}
             </Button>
           </div>
-          {/* >>> Dikembalikan: tombol navigasi deck/card/kuis <<< */}
+
+          {/* Nav actions */}
           <div className="ml-auto flex items-center gap-2">
+            {selectedGroup && selectedDeck && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={backToGroup}
+                className="rounded-lg"
+                aria-label="Kembali ke Grup"
+              >
+                <ArrowLeft className="h-4 w-4 mr-1.5" />
+                Kembali ke Grup
+              </Button>
+            )}
+
             <Button
               onClick={() => router.push("/create")}
               size="sm"
@@ -825,7 +1172,6 @@ export default function MindmapPage() {
                 Mulai Match
               </Button>
             )}
-            
           </div>
         </div>
 
@@ -871,7 +1217,7 @@ export default function MindmapPage() {
             transition: "transform 120ms ease",
           }}
         >
-          {/* Lines */}
+          {/* LINES */}
           <svg
             className="absolute top-0 left-0 pointer-events-none"
             width={CANVAS_W}
@@ -896,19 +1242,96 @@ export default function MindmapPage() {
                   <feMergeNode in="SourceGraphic" />
                 </feMerge>
               </filter>
+              <marker
+                id="arrowHead"
+                viewBox="0 0 10 10"
+                refX="9"
+                refY="5"
+                markerWidth="7"
+                markerHeight="7"
+                orient="auto-start-reverse"
+              >
+                <path d="M 0 0 L 10 5 L 0 10 z" fill="#60a5fa" />
+              </marker>
             </defs>
 
+            {/* GROUP MODE */}
+            {selectedGroup && !selectedDeck && (
+              <>
+                {(() => {
+                  const trunkX =
+                    groupTrunk?.x ?? GROUP_CENTER.x + GROUP_TO_TRUNK;
+                  const groupRight = rectAnchorTowards(
+                    GROUP_CENTER,
+                    GROUP_W,
+                    GROUP_H,
+                    { x: trunkX, y: GROUP_CENTER.y },
+                    8
+                  );
+                  return (
+                    <line
+                      x1={groupRight.x}
+                      y1={groupRight.y}
+                      x2={trunkX}
+                      y2={GROUP_CENTER.y}
+                      stroke="url(#edgeGradient)"
+                      strokeWidth={2}
+                      strokeLinecap="round"
+                      vectorEffect="non-scaling-stroke"
+                      filter="url(#softGlow)"
+                    />
+                  );
+                })()}
+
+                {groupTrunk && (
+                  <line
+                    x1={groupTrunk.x}
+                    y1={groupTrunk.y1}
+                    x2={groupTrunk.x}
+                    y2={groupTrunk.y2}
+                    stroke="url(#edgeGradient)"
+                    strokeWidth={2}
+                    strokeLinecap="round"
+                    vectorEffect="non-scaling-stroke"
+                    filter="url(#softGlow)"
+                  />
+                )}
+
+                {groupDecks.map((deck) => {
+                  const pos = groupPositions[deck.id];
+                  if (!pos) return null;
+                  const trunkX =
+                    groupTrunk?.x ?? GROUP_CENTER.x + GROUP_TO_TRUNK;
+                  const end = circleAnchorTowards(pos, NODE_R, {
+                    x: trunkX,
+                    y: pos.y,
+                  });
+                  return (
+                    <line
+                      key={`branch-${deck.id}`}
+                      x1={trunkX}
+                      y1={pos.y}
+                      x2={end.x}
+                      y2={end.y}
+                      stroke="url(#edgeGradient)"
+                      strokeWidth={2}
+                      strokeLinecap="round"
+                      vectorEffect="non-scaling-stroke"
+                      filter="url(#softGlow)"
+                      markerEnd="url(#arrowHead)"
+                    />
+                  );
+                })}
+              </>
+            )}
+
+            {/* DECK MODE */}
             {selectedDeck &&
               showCards.map((card) => {
                 const pos = positions[card.id];
                 if (!pos) return null;
                 const { w, h } = getCardSize(card.id);
-
-                const deckStart = circleAnchorTowards(
-                  CENTER,
-                  DECK_R + DECK_RING_PX / 2,
-                  pos
-                );
+                const deckStart = circleAnchorTowards(CENTER, DECK_R, pos);
                 const cardEnd = rectAnchorTowards(pos, w, h, CENTER, 12);
                 const isHover = hoverId === card.id;
 
@@ -930,6 +1353,26 @@ export default function MindmapPage() {
               })}
           </svg>
 
+          {/* PUSAT */}
+          {selectedGroup && !selectedDeck && (
+            <motion.div
+              className="absolute flex flex-col items-center justify-center rounded-xl text-white shadow-2xl ring-4 ring-white/30"
+              style={{
+                left: GROUP_CENTER.x,
+                top: GROUP_CENTER.y,
+                transform: "translate(-50%, -50%)",
+                width: GROUP_W,
+                height: GROUP_H,
+                background:
+                  "radial-gradient(ellipse at 30% 30%, rgba(99,102,241,.9), rgba(79,70,229,.95) 60%, rgba(37,99,235,.95))",
+              }}
+            >
+              <div className="px-3 text-center text-sm font-semibold leading-tight line-clamp-2">
+                {selectedGroup?.name}
+              </div>
+            </motion.div>
+          )}
+
           {selectedDeck && (
             <motion.div
               className="absolute flex flex-col items-center justify-center rounded-full text-white shadow-2xl ring-4 ring-white/30"
@@ -939,8 +1382,6 @@ export default function MindmapPage() {
                 transform: "translate(-50%, -50%)",
                 width: DECK_DIAM,
                 height: DECK_DIAM,
-                marginLeft: -2,
-                marginTop: -4,
                 background:
                   "radial-gradient(ellipse at 30% 30%, rgba(99,102,241,.9), rgba(79,70,229,.95) 60%, rgba(37,99,235,.95))",
               }}
@@ -951,7 +1392,46 @@ export default function MindmapPage() {
             </motion.div>
           )}
 
-          {/* FLASHCARD NODES */}
+          {/* GROUP DECK NODES */}
+          {selectedGroup &&
+            !selectedDeck &&
+            groupDecks.map((d) => {
+              const pos = groupPositions[d.id] || GROUP_CENTER;
+              return (
+                <motion.div
+                  key={`group-node-${d.id}`}
+                  initial={{ scale: 0.98, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  transition={{ type: "spring", stiffness: 240, damping: 20 }}
+                  className="absolute cursor-pointer"
+                  style={{
+                    left: pos.x,
+                    top: pos.y,
+                    width: NODE_W,
+                    height: NODE_H,
+                    transform: "translate(-50%, -50%)",
+                    zIndex: 10,
+                  }}
+                  onClick={() => setSelectedDeckId(d.id)}
+                >
+                  <div
+                    className="flex flex-col items-center justify-center rounded-full text-white shadow-lg ring-2 ring-white/20 hover:ring-white/40 transition-all"
+                    style={{
+                      width: "100%",
+                      height: "100%",
+                      background:
+                        "radial-gradient(ellipse at 30% 30%, rgba(99,102,241,.9), rgba(79,70,229,.95) 60%, rgba(37,99,235,.95))",
+                    }}
+                  >
+                    <div className="px-3 text-center text-sm font-semibold leading-tight line-clamp-2">
+                      {d.name}
+                    </div>
+                  </div>
+                </motion.div>
+              );
+            })}
+
+          {/* FLASHCARDS */}
           {showCards.map((card) => {
             const pos = positions[card.id] || CENTER;
             const isFlipped = !!flipped[card.id];
@@ -974,16 +1454,21 @@ export default function MindmapPage() {
                   transform: "translate(-50%, -50%)",
                   zIndex: isExpanded ? 20 : 10,
                 }}
+                onPointerDown={startDrag(card.id)}
               >
                 <div
-                  onMouseDown={startDrag(card.id)}
                   onMouseEnter={() => setHoverId(card.id)}
                   onMouseLeave={() => setHoverId(null)}
                   className="group relative h-full select-none rounded-xl border bg-white/70 dark:bg-gray-900/70 backdrop-blur-xl shadow-lg transition-all hover:shadow-xl hover:-translate-y-0.5"
                   style={{ borderColor: "rgba(99,102,241,0.25)" }}
                 >
                   {/* header/handle */}
-                  <div className="flex items-center justify-between px-3 py-1.5 text-xs text-gray-600 dark:text-gray-300 cursor-grab active:cursor-grabbing">
+                  <div
+                    data-card-handle="1"
+                    className="flex items-center justify-between px-3 py-1.5 text-xs text-gray-600 dark:text-gray-300 cursor-grab active:cursor-grabbing"
+                    // id sementara untuk pointer capture/release
+                    id="__drag_handle__"
+                  >
                     <div className="flex items-center gap-1.5">
                       <Move className="h-3.5 w-3.5 opacity-70" />
                     </div>
@@ -991,11 +1476,10 @@ export default function MindmapPage() {
                       <div className="rounded-full px-2 py-0.5 bg-indigo-600/10 text-indigo-600 dark:text-indigo-300">
                         {card.tags?.[0] ?? "Card"}
                       </div>
-                      {/* Expand button */}
-                      {/* Expand button (ikon, lebih rapi & konsisten) */}
                       <button
+                        data-nodrag="1"
+                        onPointerDown={(e) => e.stopPropagation()}
                         className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] border border-gray-200 dark:border-white/20 hover:bg-indigo-50/50 dark:hover:bg-indigo-950/20 text-indigo-600 dark:text-indigo-300 transition"
-                        onMouseDown={(e) => e.stopPropagation()}
                         onClick={(e) => {
                           e.stopPropagation();
                           toggleExpand(card.id);
@@ -1015,21 +1499,20 @@ export default function MindmapPage() {
                     </div>
                   </div>
 
-                  {/* body flip area */}
+                  {/* body flip */}
                   <div
                     role="button"
                     tabIndex={0}
+                    aria-pressed={isFlipped}
                     aria-label={
                       isFlipped ? "Tampilkan pertanyaan" : "Tampilkan jawaban"
                     }
+                    onPointerDown={onBodyPointerDown}
                     onClick={tryFlip(card.id)}
                     onKeyDown={tryFlip(card.id)}
                     onDoubleClick={() => toggleExpand(card.id)}
                     className="relative mx-2 mb-2 rounded-lg overflow-hidden"
-                    style={{
-                      height: bodyH,
-                      perspective: "1000px",
-                    }}
+                    style={{ height: bodyH, perspective: "1000px" }}
                   >
                     <div
                       className="relative w-full h-full"
@@ -1050,10 +1533,7 @@ export default function MindmapPage() {
                         <div className="text-[10px] uppercase tracking-wide text-indigo-600/80 dark:text-indigo-300/90">
                           Pertanyaan
                         </div>
-                        <div
-                          className="text-[13px] text-gray-900 dark:text-gray-100 font-medium whitespace-pre-wrap break-words overflow-auto pr-1"
-                          style={{ scrollbarGutter: "stable" }}
-                        >
+                        <div className="text-[13px] text-gray-900 dark:text-gray-100 font-medium whitespace-pre-wrap break-words overflow-auto pr-1">
                           {card.question || "Tidak ada pertanyaan"}
                         </div>
                         <div className="absolute right-2 bottom-2 text-[10px] text-muted-foreground opacity-80">
@@ -1075,13 +1555,9 @@ export default function MindmapPage() {
                         <div className="text-[10px] uppercase tracking-wide text-emerald-600/90 dark:text-emerald-300">
                           Jawaban
                         </div>
-                        <div
-                          className="text-[13px] text-gray-900 dark:text-gray-100 font-medium leading-snug whitespace-pre-wrap break-words overflow-auto pr-1"
-                          style={{ scrollbarGutter: "stable" }}
-                        >
+                        <div className="text-[13px] text-gray-900 dark:text-gray-100 font-medium leading-snug whitespace-pre-wrap break-words overflow-auto pr-1">
                           {card.answer || "Tidak ada jawaban"}
                         </div>
-
                         {card.imageUrl && (
                           <div className="mt-1">
                             {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -1092,7 +1568,6 @@ export default function MindmapPage() {
                             />
                           </div>
                         )}
-
                         <div className="absolute right-2 bottom-2 text-[10px] text-muted-foreground opacity-80">
                           Klik / Tap untuk kembali
                         </div>
@@ -1100,7 +1575,6 @@ export default function MindmapPage() {
                     </div>
                   </div>
 
-                  {/* glow */}
                   <div className="pointer-events-none absolute inset-0 rounded-xl ring-1 ring-indigo-500/20 group-hover:ring-indigo-500/40" />
                 </div>
               </motion.div>
@@ -1119,7 +1593,7 @@ export default function MindmapPage() {
         </div>
       </div>
 
-      {/* FLOATING ZOOM CONTROLS (fixed) */}
+      {/* FLOATING ZOOM CONTROLS */}
       <div className="fixed bottom-3 right-3 z-50">
         <div className="rounded-xl border bg-background/90 backdrop-blur px-2 py-1.5 shadow-sm">
           <div className="flex items-center gap-1.5">
@@ -1158,9 +1632,8 @@ export default function MindmapPage() {
       {/* FOOT TIP */}
       <div className="text-[11px] text-muted-foreground flex items-center gap-2">
         <GridIcon className="h-3.5 w-3.5" />
-        Konten panjang <b>wrap & scroll</b>. Double-click atau tombol{" "}
-        <b>Expand</b> buat perbesar kartu. Flip tetap: klik/tap badan kartu.
-        Shortcuts: <b>+</b>, <b>-</b>, <b>F</b>.
+        Mode Group: kolom rapi (trunk + panah). Mode Deck: radial. Shortcuts:{" "}
+        <b>+</b>, <b>-</b>, <b>F</b>.
       </div>
     </div>
   );
