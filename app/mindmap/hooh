@@ -1,0 +1,43 @@
+   <!-- {/* Tools kanan */}
+          <div className="flex items-center gap-1">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={handleAutoLayout}
+              disabled={!selectedDeck || !flashcards.length}
+            >
+              <RefreshCw className="mr-2 h-4 w-4" />
+              Auto
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={handleSaveLayout}
+              disabled={!selectedDeck || !flashcards.length}
+            >
+              <Save className="mr-2 h-4 w-4" />
+              Save
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={handleResetLayout}
+              disabled={!selectedDeck || !flashcards.length}
+            >
+              <CircleDot className="mr-2 h-4 w-4" />
+              Reset
+            </Button>
+            <Button
+              size="icon"
+              variant="ghost"
+              onClick={() => setCollapsed((c) => !c)}
+              aria-label="Toggle toolbar detail"
+            >
+              {collapsed ? (
+                <ChevronDown className="h-4 w-4" />
+              ) : (
+                <ChevronUp className="h-4 w-4" />
+              )}
+            </Button>
+          </div>
+        </div> -->

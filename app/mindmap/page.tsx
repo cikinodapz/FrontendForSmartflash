@@ -677,7 +677,10 @@ export default function MindmapPage() {
 
           <DialogFooter className="px-6 pb-6">
             <div className="ml-auto flex items-center gap-2">
-              <Button variant="outline" onClick={() => setDeckPickerOpen(false)}>
+              <Button
+                variant="outline"
+                onClick={() => setDeckPickerOpen(false)}
+              >
                 Nanti saja
               </Button>
               <Button onClick={confirmPickDeck}>Tampilkan</Button>
@@ -717,7 +720,9 @@ export default function MindmapPage() {
                 </SelectContent>
               </Select>
             ) : (
-              <div className="text-xs text-muted-foreground">Belum ada deck</div>
+              <div className="text-xs text-muted-foreground">
+                Belum ada deck
+              </div>
             )}
           </div>
 
@@ -730,32 +735,7 @@ export default function MindmapPage() {
             />
           </div>
 
-          {/* >>> Dikembalikan: tombol navigasi deck/card/kuis <<< */}
-          <div className="ml-auto flex items-center gap-2">
-            <Button onClick={() => router.push("/create")} size="sm">
-              Buat Deck
-            </Button>
-            {selectedDeck && (
-              <Button
-                onClick={() => router.push(`/edit/${selectedDeck.id}`)}
-                size="sm"
-                variant="outline"
-              >
-                Tambah Card
-              </Button>
-            )}
-            {selectedDeck && flashcards.length > 0 && (
-              <Button
-                size="sm"
-                variant="secondary"
-                onClick={() => router.push(`/study/${selectedDeck.id}`)}
-              >
-                Mulai Kuis
-              </Button>
-            )}
-          </div>
-
-          {/* Tools kanan */}
+             {/* Tools kanan */}
           <div className="flex items-center gap-1">
             <Button
               size="sm"
@@ -797,12 +777,66 @@ export default function MindmapPage() {
               )}
             </Button>
           </div>
+          {/* >>> Dikembalikan: tombol navigasi deck/card/kuis <<< */}
+          <div className="ml-auto flex items-center gap-2">
+            <Button
+              onClick={() => router.push("/create")}
+              size="sm"
+              className="bg-gradient-to-r from-indigo-500 to-purple-500 hover:from-indigo-600 hover:to-purple-600 text-white rounded-lg transition-all"
+              aria-label="Buat Deck"
+            >
+              <Sparkles className="h-4 w-4 mr-1.5" />
+              Buat Deck
+            </Button>
+
+            {selectedDeck && (
+              <Button
+                onClick={() => router.push(`/edit/${selectedDeck.id}`)}
+                size="sm"
+                variant="outline"
+                className="border border-gray-200 dark:border-white/20 text-indigo-600 dark:text-indigo-300 hover:bg-indigo-50/50 dark:hover:bg-indigo-950/20 rounded-lg transition-all"
+                aria-label="Tambah Card"
+              >
+                <Save className="h-4 w-4 mr-1.5" />
+                Tambah Card
+              </Button>
+            )}
+
+            {selectedDeck && flashcards.length > 0 && (
+              <Button
+                size="sm"
+                onClick={() => router.push(`/study/${selectedDeck.id}`)}
+                className="bg-gradient-to-r from-indigo-500 to-purple-500 hover:from-indigo-600 hover:to-purple-600 text-white rounded-lg transition-all"
+                aria-label="Mulai Kuis"
+              >
+                <PanelTop className="h-4 w-4 mr-1.5" />
+                Mulai Kuis
+              </Button>
+            )}
+
+            {selectedDeck && flashcards.length >= 2 && (
+              <Button
+                size="sm"
+                onClick={() => router.push(`/match/${selectedDeck.id}`)}
+                className="bg-gradient-to-r from-cyan-500 to-indigo-500 hover:from-cyan-600 hover:to-indigo-600 text-white rounded-lg transition-all"
+                aria-label="Mulai Match"
+              >
+                <CircleDot className="h-4 w-4 mr-1.5" />
+                Mulai Match
+              </Button>
+            )}
+            
+          </div>
         </div>
 
         {!collapsed && selectedDeck && (
           <div className="flex flex-wrap items-center gap-4 px-3 pb-2">
             <div className="flex items-center gap-2 text-sm">
-              <Switch checked={snapGrid} onCheckedChange={setSnapGrid} id="snap" />
+              <Switch
+                checked={snapGrid}
+                onCheckedChange={setSnapGrid}
+                id="snap"
+              />
               <Label htmlFor="snap" className="cursor-pointer">
                 Snap-to-grid
               </Label>
@@ -849,7 +883,13 @@ export default function MindmapPage() {
                 <stop offset="0%" stopColor="#a78bfa" />
                 <stop offset="100%" stopColor="#60a5fa" />
               </linearGradient>
-              <filter id="softGlow" x="-50%" y="-50%" width="200%" height="200%">
+              <filter
+                id="softGlow"
+                x="-50%"
+                y="-50%"
+                width="200%"
+                height="200%"
+              >
                 <feGaussianBlur stdDeviation="1.5" result="coloredBlur" />
                 <feMerge>
                   <feMergeNode in="coloredBlur" />
@@ -952,15 +992,24 @@ export default function MindmapPage() {
                         {card.tags?.[0] ?? "Card"}
                       </div>
                       {/* Expand button */}
+                      {/* Expand button (ikon, lebih rapi & konsisten) */}
                       <button
-                        className="rounded-md px-1.5 py-0.5 border text-[10px] hover:bg-muted"
+                        className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] border border-gray-200 dark:border-white/20 hover:bg-indigo-50/50 dark:hover:bg-indigo-950/20 text-indigo-600 dark:text-indigo-300 transition"
                         onMouseDown={(e) => e.stopPropagation()}
                         onClick={(e) => {
                           e.stopPropagation();
                           toggleExpand(card.id);
                         }}
                         title={isExpanded ? "Kecilkan" : "Perbesar"}
+                        aria-label={
+                          isExpanded ? "Kecilkan kartu" : "Perbesar kartu"
+                        }
                       >
+                        {isExpanded ? (
+                          <ChevronDown className="h-3.5 w-3.5" />
+                        ) : (
+                          <ChevronUp className="h-3.5 w-3.5" />
+                        )}
                         {isExpanded ? "Collapse" : "Expand"}
                       </button>
                     </div>
@@ -1072,16 +1121,35 @@ export default function MindmapPage() {
 
       {/* FLOATING ZOOM CONTROLS (fixed) */}
       <div className="fixed bottom-3 right-3 z-50">
-        <div className="rounded-lg border bg-background/90 backdrop-blur px-1.5 py-1 shadow-sm">
-          <div className="flex items-center gap-1">
-            <Button size="icon" variant="ghost" className="h-8 w-8" onClick={zoomOut}>
+        <div className="rounded-xl border bg-background/90 backdrop-blur px-2 py-1.5 shadow-sm">
+          <div className="flex items-center gap-1.5">
+            <Button
+              size="icon"
+              variant="ghost"
+              className="h-9 w-9"
+              onClick={zoomOut}
+              aria-label="Zoom out"
+            >
               <ZoomOut className="h-4 w-4" />
             </Button>
-            <Button size="icon" variant="ghost" className="h-8 w-8" onClick={zoomIn}>
+            <Button
+              size="icon"
+              variant="ghost"
+              className="h-9 w-9"
+              onClick={zoomIn}
+              aria-label="Zoom in"
+            >
               <ZoomIn className="h-4 w-4" />
             </Button>
-            <Button size="sm" variant="outline" className="h-8" onClick={zoomFit}>
-              <Maximize className="mr-1 h-4 w-4" /> Fit
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-9 rounded-lg border border-gray-200 dark:border-white/20 text-indigo-600 dark:text-indigo-300 hover:bg-indigo-50/50 dark:hover:bg-indigo-950/20"
+              onClick={zoomFit}
+              aria-label="Fit to screen"
+            >
+              <Maximize className="mr-1 h-4 w-4" />
+              Fit
             </Button>
           </div>
         </div>
@@ -1090,8 +1158,9 @@ export default function MindmapPage() {
       {/* FOOT TIP */}
       <div className="text-[11px] text-muted-foreground flex items-center gap-2">
         <GridIcon className="h-3.5 w-3.5" />
-        Konten panjang <b>wrap & scroll</b>. Double-click atau tombol <b>Expand</b> buat
-        perbesar kartu. Flip tetap: klik/tap badan kartu. Shortcuts: <b>+</b>, <b>-</b>, <b>F</b>.
+        Konten panjang <b>wrap & scroll</b>. Double-click atau tombol{" "}
+        <b>Expand</b> buat perbesar kartu. Flip tetap: klik/tap badan kartu.
+        Shortcuts: <b>+</b>, <b>-</b>, <b>F</b>.
       </div>
     </div>
   );
