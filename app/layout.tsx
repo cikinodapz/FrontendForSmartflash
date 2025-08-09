@@ -9,11 +9,11 @@ import { Navigation } from "@/components/navigation"
 const inter = Inter({ subsets: ["latin"] })
 
 export const metadata: Metadata = {
-  title: "SmartFlash - Adaptive Flashcards with AI",
+  title: "MindCards - Adaptive Flashcards with AI",
   description: "Belajar lebih cerdas dengan AI yang pahami cara kerjamu!",
   manifest: "/manifest.json",
   themeColor: "#3b82f6", icons: {
-    icon: "/logo5.png",
+    icon: "/logomindcards.png",
   },
   viewport: "width=device-width, initial-scale=1, maximum-scale=1",
     generator: 'v0.dev'

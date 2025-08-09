@@ -272,7 +272,12 @@ export default function EditDeckPage() {
       if (!response.ok) throw new Error("Failed to add flashcard");
 
       const newFlashcard = await response.json();
-      setFlashcards([...flashcards, newFlashcard.flashcard]);
+      // Ensure the difficulty is a number and within valid range (1-10)
+      const validatedFlashcard = {
+        ...newFlashcard.flashcard,
+        difficulty: Math.max(1, Math.min(10, Number(newFlashcard.flashcard.difficulty) || 1)),
+      };
+      setFlashcards([...flashcards, validatedFlashcard]);
       setNewCard({
         question: "",
         answer: "",

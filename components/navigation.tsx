@@ -28,6 +28,7 @@ import {
   Bell,
   Sun,
   Moon,
+  Layers,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTheme } from "next-themes";
@@ -242,13 +243,14 @@ export function Navigation() {
   const navItems: NavItem[] = [
     { href: "/", label: "Beranda", icon: Home },
     { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+    { href: "/mindmap", label: "Mindmap", icon: Layers },
     { href: "/create", label: "Buat Deck", icon: Plus },
     { href: "/eksplorasi", label: "Eksplorasi", icon: Compass },
     isLoggedIn
       ? { label: "Logout", icon: Power, action: "logout" }
       : { href: "/login", label: "Login", icon: LogIn },
 
-      //deploy aja lagi
+    //deploy aja lagi
   ];
 
   const renderNavItem = (item: NavItem) => {
@@ -382,10 +384,10 @@ export function Navigation() {
           >
             <div className="absolute inset-0 bg-gradient-to-r from-indigo-500/30 to-purple-500/30 rounded-full blur-md group-hover:blur-lg transition-all duration-300" />
             <Image
-              src="/logo5.png"
+              src="/logomindcards.png"
               alt="SmartFlash Logo"
-              width={60}
-              height={60}
+              width={90}
+              height={90}
               className="h-12 w-12 relative z-10 transition-transform"
             />
           </motion.div>
@@ -395,7 +397,7 @@ export function Navigation() {
             animate={{ opacity: 1, x: 0 }}
             transition={{ duration: 0.5 }}
           >
-            SmartFlash
+            MindCards
           </motion.span>
         </Link>
 
