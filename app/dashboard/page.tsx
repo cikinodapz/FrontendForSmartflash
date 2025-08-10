@@ -1185,7 +1185,7 @@ export default function DashboardPage() {
                   <div className="p-1.5 sm:p-2 rounded-full bg-yellow-100 dark:bg-yellow-900/20">
                     <Award className="w-5 sm:w-6 h-5 sm:h-6 text-yellow-600 dark:text-yellow-400" />
                   </div>
-                  Learning Recommendations
+                  Learning Performances
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-3 sm:space-y-4">

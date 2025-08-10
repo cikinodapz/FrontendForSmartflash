@@ -406,7 +406,7 @@ export default function DeckGroupsPage() {
               {Array.from({ length: 6 }).map((_, i) => (
                 <div
                   key={i}
-                  className="h-32 rounded-xl bg-white/70 dark:bg-white/5 border border-gray-200 dark:border-white/20 animate-pulse"
+                  className="h-48 rounded-xl bg-white/70 dark:bg-white/5 border border-gray-200 dark:border-white/20 animate-pulse"
                 />
               ))}
             </div>
@@ -433,74 +433,81 @@ export default function DeckGroupsPage() {
               {filteredGroups.map((group, idx) => (
                 <motion.div
                   key={group.id}
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.02 * idx }}
-                  className="group relative rounded-xl bg-white/80 dark:bg-gray-900/10 backdrop-blur-md border border-gray-200/50 dark:border-white/20 p-4 shadow-sm hover:shadow-lg transition-shadow"
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  transition={{ delay: 0.05 * idx, duration: 0.3 }}
+                  className="group relative rounded-xl overflow-hidden bg-white/90 dark:bg-gray-800/90 border border-gray-200/50 dark:border-gray-700/50 shadow-md hover:shadow-xl transition-all duration-300 hover:-translate-y-1"
                 >
-                  <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
-                        {group.name}
-                      </h3>
-                      <p className="text-sm text-gray-600 dark:text-white/70 line-clamp-2">
-                        {group.description || "-"}
-                      </p>
-                    </div>
-                    <Badge
-                      variant="secondary"
-                      className={`flex items-center gap-1 ${
-                        group.isPublic
-                          ? "bg-emerald-500/20 text-emerald-700 dark:text-emerald-300"
-                          : "bg-amber-500/20 text-amber-700 dark:text-amber-300"
-                      }`}
-                    >
-                      {group.isPublic ? (
-                        <Globe2 className="w-3.5 h-3.5" />
-                      ) : (
-                        <Lock className="w-3.5 h-3.5" />
-                      )}
-                      {group.isPublic ? "Publik" : "Pribadi"}
-                    </Badge>
-                  </div>
+                  {/* Gradient overlay for visual interest */}
+                  <div className="absolute inset-0 bg-gradient-to-br from-indigo-500/5 to-purple-500/5 dark:from-indigo-900/20 to-purple-900/20 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
 
-                  <div className="mt-3 flex items-center gap-2 text-xs text-gray-600 dark:text-white/60">
-                    <Users className="w-3.5 h-3.5" /> {group.decks.length} deck
-                  </div>
-
-                  {/* Selected decks preview */}
-                  <div className="mt-3 flex flex-wrap gap-1.5 max-h-16 overflow-y-auto">
-                    {group.decks.slice(0, 6).map((d) => (
-                      <span
-                        key={d.id}
-                        className="text-[11px] px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-700 dark:text-indigo-300 border border-indigo-500/20"
+                  <div className="relative p-4">
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                          {group.name}
+                        </h3>
+                        <p className="text-sm text-gray-600 dark:text-gray-400 line-clamp-2 mt-1">
+                          {group.description || "No description provided"}
+                        </p>
+                      </div>
+                      <Badge
+                        variant="outline"
+                        className={`border ${group.isPublic ? "border-emerald-500 text-emerald-600 dark:text-emerald-400" : "border-amber-500 text-amber-600 dark:text-amber-400"}`}
                       >
-                        {d.name}
-                      </span>
-                    ))}
-                    {group.decks.length > 6 && (
-                      <span className="text-[11px] px-2 py-0.5 rounded-full bg-gray-500/10 text-gray-700 dark:text-gray-300 border border-gray-500/20">
-                        +{group.decks.length - 6} lainnya
-                      </span>
-                    )}
-                  </div>
+                        {group.isPublic ? (
+                          <Globe2 className="w-3 h-3 mr-1" />
+                        ) : (
+                          <Lock className="w-3 h-3 mr-1" />
+                        )}
+                        {group.isPublic ? "Public" : "Private"}
+                      </Badge>
+                    </div>
 
-                  {/* Actions */}
-                  <div className="mt-4 flex justify-end gap-2">
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      onClick={() => openEditDialog(group)}
-                    >
-                      <Edit2 className="w-4 h-4 mr-1" /> Edit
-                    </Button>
-                    <Button
-                      variant="destructive"
-                      size="sm"
-                      onClick={() => handleDelete(group.id)}
-                    >
-                      <Trash2 className="w-4 h-4 mr-1" /> Hapus
-                    </Button>
+                    <div className="mt-4 flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
+                      <Layers className="w-4 h-4" /> {group.decks.length} decks
+                    </div>
+
+                    {/* Selected decks preview - improved with hover tooltip or limited display */}
+                    <div className="mt-3 flex flex-wrap gap-1">
+                      {group.decks.slice(0, 4).map((d) => (
+                        <Badge
+                          key={d.id}
+                          variant="secondary"
+                          className="text-xs bg-indigo-100 text-indigo-800 dark:bg-indigo-900/50 dark:text-indigo-300"
+                        >
+                          {d.name}
+                        </Badge>
+                      ))}
+                      {group.decks.length > 4 && (
+                        <Badge
+                          variant="secondary"
+                          className="text-xs bg-gray-100 text-gray-800 dark:bg-gray-900/50 dark:text-gray-300"
+                        >
+                          +{group.decks.length - 4} more
+                        </Badge>
+                      )}
+                    </div>
+
+                    {/* Actions */}
+                    <div className="mt-4 flex justify-end gap-2">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => openEditDialog(group)}
+                        className="text-indigo-600 hover:text-indigo-800 dark:text-indigo-400 dark:hover:text-indigo-200"
+                      >
+                        <Edit2 className="w-4 h-4 mr-1" /> Edit
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleDelete(group.id)}
+                        className="text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-200"
+                      >
+                        <Trash2 className="w-4 h-4 mr-1" /> Delete
+                      </Button>
+                    </div>
                   </div>
                 </motion.div>
               ))}
